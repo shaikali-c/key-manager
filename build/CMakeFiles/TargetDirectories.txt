@@ -1,0 +1,3 @@
+C:/Users/Bubu/Documents/kode/wallet/build/CMakeFiles/Wallet.dir
+C:/Users/Bubu/Documents/kode/wallet/build/CMakeFiles/edit_cache.dir
+C:/Users/Bubu/Documents/kode/wallet/build/CMakeFiles/rebuild_cache.dir
