@@ -1,0 +1,7 @@
+.vs/
+build/
+out/
+x64/
+x86/
+*.vcxproj.user
+*.suo
