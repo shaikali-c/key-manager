@@ -1,16 +1,9 @@
 #include "wallet.h"
+#include <cmath>
+#include <cpr/callback.h>
 
 // Utility function implementations
-
-Hash getBytes(const std::string& hex) {
-    Hash bytes{};
-    if (sodium_hex2bin(bytes.data(), bytes.size(), hex.data(), hex.size(),
-        nullptr, nullptr, nullptr) != 0) {
-        throw std::runtime_error("Failed to convert hex to bytes");
-    }
-    return bytes;
-}
-
+//
 Addr getBytesAddr(const std::string& hex) {
     Addr bytes{};
     if (sodium_hex2bin(bytes.data(), bytes.size(), hex.data(), hex.size(),
@@ -109,7 +102,18 @@ void Wallet::printKeys() const {
 
 std::pair<std::vector<Input>, std::vector<UTXO>>
 Wallet::prepareInputsOutputs(const Addr& receiver, uint64_t amount) {
-    cpr::Response response = cpr::Get(cpr::Url{ DEFAULT_UTXO_URL });
+
+    nlohmann::json requestUTXO{
+        {"address", getHex(address)},
+        {"coins", amount}
+    };
+
+    std::string url = "http://127.0.0.1:18080/utxo";
+    cpr::Response response = cpr::Post(
+        cpr::Url{url},
+        cpr::Body{requestUTXO.dump()},
+        cpr::Header{{"Content-Type", "application/json"}}
+    );
 
     if (response.error.code != cpr::ErrorCode::OK) {
         throw std::runtime_error("Request failed: " + response.error.message);
@@ -118,42 +122,52 @@ Wallet::prepareInputsOutputs(const Addr& receiver, uint64_t amount) {
     json utxoResponse = json::parse(response.text);
     std::vector<Input> inputs;
     std::vector<UTXO> outputs;
-    uint64_t totalCoins = 0;
 
+    // Check if utxos exists and is an array
     if (!utxoResponse.contains("utxos") || !utxoResponse["utxos"].is_array()) {
-        throw std::runtime_error("Invalid UTXO response format");
+        throw std::runtime_error("Invalid UTXO response format: missing or invalid utxos field");
+    }
+
+    // Check if utxos array is empty
+    if (utxoResponse["utxos"].empty()) {
+        throw std::runtime_error("No UTXOs available");
     }
 
     for (const auto& utxo : utxoResponse["utxos"]) {
-        if (!utxo.contains("utxoKey") || !utxo["utxoKey"].is_string()) {
-            throw std::runtime_error("Missing or invalid utxoKey field");
+        // Check utxoKey field
+        if (!utxo.contains("utxoKey") ||
+            !utxo["utxoKey"].is_string() ||
+            utxo["utxoKey"].get<std::string>().empty()) {
+            throw std::runtime_error("Missing or invalid utxoKey field in UTXO entry");
+        }
+
+        // Check outputIndex field
+        if (!utxo.contains("outputIndex")) {
+            throw std::runtime_error("Missing outputIndex field in UTXO entry");
+        }
+
+        if (!utxo["outputIndex"].is_number()) {
+            throw std::runtime_error("outputIndex is not a number");
+        }
+
+        // Check coins field
+        if (!utxoResponse.contains("coins")) {
+            throw std::runtime_error("Missing coins field in UTXO entry");
+        }
+
+        if (!utxoResponse["coins"].is_number()) {
+            throw std::runtime_error("coins is not a number");
         }
 
         std::string utxoKey = utxo["utxoKey"].get<std::string>();
-        size_t pos = utxoKey.find(':');
+        uint32_t outputIndex = utxo["outputIndex"].get<uint32_t>();
 
-        if (pos == std::string::npos) {
-            throw std::runtime_error("Invalid utxoKey format: " + utxoKey);
-        }
-
-        std::string transactionHashHex = utxoKey.substr(0, pos);
-        std::string indexStr = utxoKey.substr(pos + 1);
-
-        if (transactionHashHex.empty()) {
-            throw std::runtime_error("Empty transaction hash");
-        }
-
-        uint32_t outputIndex = static_cast<uint32_t>(std::stoul(indexStr));
-        uint64_t coins = utxo["coins"].get<uint64_t>();
-        totalCoins += coins;
-
-        Hash transactionHash = getBytes(transactionHashHex);
-        inputs.emplace_back(transactionHash, outputIndex);
+        inputs.emplace_back(getBytes<Hash>(utxoKey), outputIndex);
     }
-
-    std::cout << "Inputs: " << inputs.size() << ", Total coins: " << totalCoins << "\n";
+    uint64_t totalCoins = utxoResponse["coins"].get<uint64_t>();
 
     if (totalCoins < amount) {
+        std::cout << "Insufficient funds: have " << totalCoins << ", need " << amount << "\n";
         return { {}, {} };
     }
 
@@ -166,13 +180,16 @@ Wallet::prepareInputsOutputs(const Addr& receiver, uint64_t amount) {
 }
 
 void Wallet::createTransaction() {
-    std::string receiverHex;
-    uint64_t amount;
+    std::string receiverHex{};
+    uint64_t amount{};
+    double rawAmount{};
 
     std::cout << "Receiver address: ";
     std::cin >> receiverHex;
     std::cout << "Enter amount: ";
-    std::cin >> amount;
+    std::cin >> rawAmount;
+
+    amount = static_cast<uint64_t>(std::round(rawAmount * UNITS));
 
     Addr receiver = getBytesAddr(receiverHex);
     auto [inputs, outputs] = prepareInputsOutputs(receiver, amount);
@@ -186,7 +203,6 @@ void Wallet::createTransaction() {
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
 
-    // Calculate required size efficiently
     size_t bytesSize = address.size() + receiver.size() + sizeof(amount) + sizeof(timestamp);
     for (const auto& input : inputs) {
         bytesSize += input.transactionHash.size() + sizeof(input.outputIndex);
@@ -198,27 +214,30 @@ void Wallet::createTransaction() {
     std::vector<unsigned char> bytes;
     bytes.reserve(bytesSize);
 
-    // Serialize data
-    auto appendBytes = [&bytes](const auto& data, size_t size) {
+    auto appendBytes = [&bytes](const auto& data) {
         const auto* ptr = reinterpret_cast<const unsigned char*>(&data);
-        bytes.insert(bytes.end(), ptr, ptr + size);
-        };
+        bytes.insert(bytes.end(), ptr, ptr + sizeof(data));
+    };
 
-    appendBytes(address, address.size());
-    appendBytes(receiver, receiver.size());
+    appendBytes(address);
+    appendBytes(receiver);
 
     for (const auto& input : inputs) {
-        appendBytes(input.transactionHash, input.transactionHash.size());
-        appendBytes(input.outputIndex, sizeof(input.outputIndex));
+        appendBytes(input.transactionHash);
+        appendBytes(input.outputIndex);
+        std::cout << "\n Input: " << getHex(input.transactionHash) << "\nOutput Index: " << input.outputIndex << "\n";
     }
 
     for (const auto& output : outputs) {
-        appendBytes(output.owner, output.owner.size());
-        appendBytes(output.coins, sizeof(output.coins));
+        appendBytes(output.owner);
+        appendBytes((output.coins));
+        std::cout << "\n Output: " << getHex(output.owner) << "\nOutput Index: " << output.coins << "\n";
     }
 
-    appendBytes(amount, sizeof(amount));
-    appendBytes(timestamp, sizeof(timestamp));
+    appendBytes(amount);
+    appendBytes(timestamp);
+
+    std::cout << "Timestamp: " << timestamp << "\n";
 
     Hash transactionHash = hashBytesVector(bytes);
 
@@ -227,8 +246,8 @@ void Wallet::createTransaction() {
     json outputsJson = nlohmann::json::array();
 
     transactionJson["transactionHash"] = getHex(transactionHash);
-    transactionJson["sender"] = getHex(address);
-    transactionJson["receievr"] = receiverHex;
+    transactionJson["sender"] = getHex(publicKey);
+    transactionJson["receiver"] = receiverHex;
     transactionJson["timestamp"] = timestamp;
     transactionJson["amount"] = amount;
     transactionJson["signature"] = getHex(sign(transactionHash));
@@ -247,6 +266,15 @@ void Wallet::createTransaction() {
 
     transactionJson["inputs"] = inputsJson;
     transactionJson["outputs"] = outputsJson;
+
+
+    cpr::Response r = cpr::Post(
+            cpr::Url{"http://127.0.0.1:18080/createTransaction"},
+            cpr::Body{transactionJson.dump()},
+            cpr::Header{{"Content-Type", "application/json"}}
+    );
+    std::cout << r.text << "\n";
+
 }
 
 Signature Wallet::sign(Hash& hash) {

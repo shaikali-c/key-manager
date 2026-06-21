@@ -26,6 +26,8 @@ public:
         return instance;
     }
 
+   	static constexpr uint64_t UNITS = 1000000;
+
     // Disable copy
     Wallet(const Wallet&) = delete;
     Wallet& operator=(const Wallet&) = delete;
@@ -39,10 +41,9 @@ public:
     void printKeys() const;
     void createTransaction();
     void createKeys();
+    bool verifySignature(const Signature& signature, const Hash& hash);
 
 private:
-    static constexpr const char* DEFAULT_UTXO_URL = "http://localhost:8080/utxo/b4720462ac198c6e6a55a89de9445498a64406aa";
-
     Wallet();
     ~Wallet() = default;
 
@@ -52,7 +53,6 @@ private:
 
     std::pair<std::vector<Input>, std::vector<UTXO>> prepareInputsOutputs(const Addr& receiver, uint64_t amount);
     Signature sign(Hash& hash);
-    bool verifySignature(const Signature& signature, const Hash& hash);
 
     std::unique_ptr<leveldb::DB> keysDatabase;
     PublicKey publicKey{};
@@ -68,6 +68,14 @@ std::string getHex(const T& bytes) {
     hex.pop_back(); // Remove null terminator
     return hex;
 }
-Hash getBytes(const std::string& hex);
+template <typename T>
+T getBytes(const std::string& hex) {
+    T bytes{};
+    if (sodium_hex2bin(bytes.data(), bytes.size(), hex.data(), hex.size(),
+        nullptr, nullptr, nullptr) != 0) {
+        throw std::runtime_error("Failed to convert hex to bytes");
+    }
+    return bytes;
+}
 Addr getBytesAddr(const std::string& hex);
 Hash hashBytesVector(const std::vector<unsigned char>& bytes);

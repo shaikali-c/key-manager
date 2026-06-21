@@ -1,208 +1,93 @@
 ﻿#include "wallet.h"
-#include <cstdlib>  // for system()
+#include <sodium/crypto_sign.h>
 
-void printMenu() {
-    std::cout << "\n====================================\n";
-    std::cout << "         CRYPTO WALLET MENU           \n";
-    std::cout << "======================================\n";
-    std::cout << "  1. Create New Keys                  \n";
-    std::cout << "  2. Load Existing Keys               \n";
-    std::cout << "  3. Save Keys to Database            \n";
-    std::cout << "  4. Print Keys & Address             \n";
-    std::cout << "  5. Create Transaction               \n";
-    std::cout << "  6. View Balance                     \n";
-    std::cout << "  7. Exit                             \n";
-    std::cout << "======================================\n";
-    std::cout << "  Enter your choice (1-7): ";
-}
+void signHash() {
+    std::string hashHex;
+    std::string secretKeyHex;
 
-void printHeader(const std::string& title) {
-    std::cout << "\n-------------------------------------\n";
-    std::cout << "  " << title << "\n";
-    std::cout << "----------------------------------------\n";
-}
-
-void pauseForUser() {
-    std::cout << "\nPress Enter to continue...";
-    std::cin.ignore();
-    std::cin.get();
-}
-
-void clearScreen() {
-#ifdef _WIN32
-    system("cls");
-#else
-    system("clear");
-#endif
-}
-
-void displayKeysInfo(const Wallet& wallet) {
-    printHeader("WALLET INFORMATION");
-    wallet.printKeys();
-}
-
-void displayTransactionPrompt() {
-    printHeader("CREATE NEW TRANSACTION");
-    std::cout << "Preparing to create transaction...\n";
+    std::cout << "Hash hex: ";
+    std::cin >> hashHex;
+    std::cout << "\nPublic Key: ";
+    std::cin >> secretKeyHex;
+    Hash hash = getBytes<Hash>(hashHex);
+    SecretKey secretKey = getBytes<SecretKey>(secretKeyHex);
+    Signature signature{};
+    crypto_sign_detached(signature.data(), nullptr, hash.data(), hash.size(), secretKey.data());
+    std::cout << "\nSignature: " << getHex(signature) << "\n";
 }
 
 int main() {
-    std::cout << "=== PROGRAM START ===" << std::endl;
-
-    // Check sodium initialization
-    std::cout << "Initializing sodium..." << std::endl;
     if (sodium_init() < 0) {
-        std::cerr << "Failed to initialize sodium library!\n";
-        std::cout << "Press Enter to exit...";
-        std::cin.get();
+        std::cout << "Failed to initialize sodium\n";
         return 1;
     }
-    std::cout << "Sodium initialized successfully!" << std::endl;
 
-    try {
-        std::cout << "Getting wallet instance..." << std::endl;
-        Wallet& wallet = Wallet::getInstance();
-        std::cout << "Wallet instance obtained!" << std::endl;
+    Wallet& wallet = Wallet::getInstance();
 
-        int choice;
-        bool running = true;
+    int choice;
 
-        clearScreen();
-        std::cout << "  WELCOME TO CRYPTO WALLET SYSTEM\n";
-        std::cout << "  ===============================\n";
+    while (true) {
+        std::cout << "\n";
+        std::cout << "1. Create Keys\n";
+        std::cout << "2. Load Keys\n";
+        std::cout << "3. Save Keys\n";
+        std::cout << "4. Print Keys\n";
+        std::cout << "5. Create Transaction\n";
+        std::cout << "6. Verify Signature\n";
+        std::cout << "7. Sign hash\n";
+        std::cout << "Choice: ";
 
-        while (running) {
-            printMenu();
+        std::cin >> choice;
 
-            // Check if input is valid
-            if (!(std::cin >> choice)) {
-                std::cin.clear();  // Clear error flags
-                std::cin.ignore(10000, '\n');  // Discard invalid input
-                std::cout << "\n[ERROR] Invalid input! Please enter a number.\n";
-                pauseForUser();
-                clearScreen();
-                continue;
-            }
+        switch (choice) {
+        case 1:
+            wallet.createKeys();
+            std::cout << "Keys created\n";
+            break;
 
-            try {  // Inner try-catch for each operation
-                switch (choice) {
-                case 1: {
-                    clearScreen();
-                    printHeader("CREATE NEW KEYS");
-                    std::cout << "Generating new cryptographic keys...\n";
-                    wallet.createKeys();
-                    std::cout << "[SUCCESS] Keys created successfully!\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+        case 2:
+            wallet.loadKeys();
+            std::cout << "Keys loaded\n";
+            break;
 
-                case 2: {
-                    clearScreen();
-                    printHeader("LOAD EXISTING KEYS");
-                    std::cout << "Loading keys from database...\n";
-                    wallet.loadKeys();
-                    std::cout << "[SUCCESS] Keys loaded successfully!\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+        case 3:
+            wallet.saveKeys();
+            std::cout << "Keys saved\n";
+            break;
 
-                case 3: {
-                    clearScreen();
-                    printHeader("SAVE KEYS TO DATABASE");
-                    std::cout << "Saving current keys to database...\n";
-                    wallet.saveKeys();
-                    std::cout << "[SUCCESS] Keys saved successfully!\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+        case 4:
+            wallet.printKeys();
+            break;
 
-                case 4: {
-                    clearScreen();
-                    displayKeysInfo(wallet);
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+        case 5:
+            wallet.createTransaction();
+            break;
 
-                case 5: {
-                    clearScreen();
-                    displayTransactionPrompt();
-                    wallet.createTransaction();
-                    std::cout << "\n[SUCCESS] Transaction created successfully!\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+        case 6: {
+            std::string signatureHex;
+            std::string hashHex;
 
-                case 6: {
-                    clearScreen();
-                    printHeader("VIEW BALANCE");
-                    std::cout << "Feature coming soon...\n";
-                    std::cout << "Use UTXO endpoint to check balance.\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
+            std::cout << "Signature: ";
+            std::cin >> signatureHex;
 
-                case 7: {
-                    clearScreen();
-                    std::cout << "\n  Thank you for using Crypto Wallet!\n";
-                    std::cout << "  Goodbye!\n\n";
-                    running = false;
-                    break;
-                }
+            std::cout << "Hash: ";
+            std::cin >> hashHex;
 
-                default: {
-                    std::cout << "\n[ERROR] Invalid choice! Please enter a number between 1-7.\n";
-                    pauseForUser();
-                    clearScreen();
-                    break;
-                }
-                }
-            }
-            catch (const std::runtime_error& e) {
-                std::cerr << "\n[RUNTIME ERROR] " << e.what() << std::endl;
-                pauseForUser();
-                clearScreen();
-            }
-            catch (const std::logic_error& e) {
-                std::cerr << "\n[LOGIC ERROR] " << e.what() << std::endl;
-                pauseForUser();
-                clearScreen();
-            }
-            catch (const std::exception& e) {
-                std::cerr << "\n[STANDARD EXCEPTION] " << e.what() << std::endl;
-                pauseForUser();
-                clearScreen();
-            }
-            catch (...) {
-                std::cerr << "\n[UNKNOWN EXCEPTION] Unknown exception caught!" << std::endl;
-                std::cerr << "No exception object available" << std::endl;
-                pauseForUser();
-                clearScreen();
-            }
+            bool valid = wallet.verifySignature(
+                getBytes<Signature>(signatureHex),
+                getBytes<Hash>(hashHex)
+            );
+
+            std::cout << (valid ? "Valid\n" : "Invalid\n");
+            break;
+        }
+
+        case 7:
+            signHash();
+            break;
+        default:
+            std::cout << "Invalid choice\n";
+            break;
         }
     }
-    catch (const std::exception& e) {
-        std::cerr << "\n=== FATAL ERROR in main setup ===" << std::endl;
-        std::cerr << "Exception: " << e.what() << std::endl;
-        std::cerr << "===================================" << std::endl;
-        std::cout << "\nPress Enter to exit...";
-        std::cin.ignore();
-        std::cin.get();
-        return 1;
-    }
-    catch (...) {
-        std::cerr << "\n=== FATAL UNKNOWN ERROR in main setup ===" << std::endl;
-        std::cerr << "Press Enter to exit...";
-        std::cin.ignore();
-        std::cin.get();
-        return 1;
-    }
-
-    std::cout << "=== PROGRAM END ===" << std::endl;
-    return 0;
 }
