@@ -2,6 +2,7 @@
 build/
 out/
 x64/
+wallet-data/
 x86/
 *.vcxproj.user
 *.suo
