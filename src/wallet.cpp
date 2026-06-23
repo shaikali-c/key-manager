@@ -49,6 +49,7 @@ void Wallet::deriveAddress() {
 void Wallet::createKeys() {
     crypto_sign_keypair(publicKey.data(), secretKey.data());
     deriveAddress();
+    status = false;
 }
 
 Wallet::Wallet() {
@@ -64,20 +65,18 @@ void Wallet::saveKeys() {
     keys.append(reinterpret_cast<const char*>(secretKey.data()), secretKey.size());
 
     std::string ownerName;
-    std::cout << "Save keys as: ";
+    std::cout << "\n\tSave keys as: ";
     std::cin >> ownerName;
 
     leveldb::Status status = keysDatabase->Put(leveldb::WriteOptions(), ownerName, keys);
     if (!status.ok()) {
         throw std::runtime_error("Failed to save keys: " + status.ToString());
     }
-
-    std::cout << "\nKeys saved successfully\n";
 }
 
 void Wallet::loadKeys() {
     std::string rawBytes, key;
-    std::cout << "Enter keys name: ";
+    std::cout << "\n\tEnter keys name: ";
     std::cin >> key;
 
     leveldb::Status status = keysDatabase->Get(leveldb::ReadOptions(), key, &rawBytes);
@@ -92,12 +91,11 @@ void Wallet::loadKeys() {
     std::memcpy(publicKey.data(), rawBytes.data(), publicKey.size());
     std::memcpy(secretKey.data(), rawBytes.data() + publicKey.size(), secretKey.size());
     deriveAddress();
+    this->status = true;
 }
 
 void Wallet::printKeys() const {
-    std::cout << "Public key: " << getHex(publicKey) << "\n"
-        << "Secret Key: " << getHex(secretKey) << "\n"
-        << "Address: " << getHex(address) << "\n";
+    std::cout << "\n\tAddress: " << getHex(address) << "\n\n\n";
 }
 
 std::pair<std::vector<Input>, std::vector<UTXO>>
@@ -130,7 +128,7 @@ Wallet::prepareInputsOutputs(const Addr& receiver, uint64_t amount) {
 
     // Check if utxos array is empty
     if (utxoResponse["utxos"].empty()) {
-        throw std::runtime_error("No UTXOs available");
+        return {{},{}};
     }
 
     for (const auto& utxo : utxoResponse["utxos"]) {
@@ -167,7 +165,6 @@ Wallet::prepareInputsOutputs(const Addr& receiver, uint64_t amount) {
     uint64_t totalCoins = utxoResponse["coins"].get<uint64_t>();
 
     if (totalCoins < amount) {
-        std::cout << "Insufficient funds: have " << totalCoins << ", need " << amount << "\n";
         return { {}, {} };
     }
 
@@ -184,9 +181,9 @@ void Wallet::createTransaction() {
     uint64_t amount{};
     double rawAmount{};
 
-    std::cout << "Receiver address: ";
+    std::cout << "\n\tReceiver address: ";
     std::cin >> receiverHex;
-    std::cout << "Enter amount: ";
+    std::cout << "\n\tEnter amount: ";
     std::cin >> rawAmount;
 
     amount = static_cast<uint64_t>(std::round(rawAmount * UNITS));
@@ -195,13 +192,11 @@ void Wallet::createTransaction() {
     auto [inputs, outputs] = prepareInputsOutputs(receiver, amount);
 
     if (inputs.empty() || outputs.empty()) {
-        std::cout << "Insufficient funds for transaction\n";
+        std::cout << "\n\t[BAD]: Insufficient funds for transaction\n\n";
         return;
     }
 
-    uint64_t timestamp = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
+    uint64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
     size_t bytesSize = address.size() + receiver.size() + sizeof(amount) + sizeof(timestamp);
     for (const auto& input : inputs) {
@@ -225,19 +220,15 @@ void Wallet::createTransaction() {
     for (const auto& input : inputs) {
         appendBytes(input.transactionHash);
         appendBytes(input.outputIndex);
-        std::cout << "\n Input: " << getHex(input.transactionHash) << "\nOutput Index: " << input.outputIndex << "\n";
     }
 
     for (const auto& output : outputs) {
         appendBytes(output.owner);
         appendBytes((output.coins));
-        std::cout << "\n Output: " << getHex(output.owner) << "\nOutput Index: " << output.coins << "\n";
     }
 
     appendBytes(amount);
     appendBytes(timestamp);
-
-    std::cout << "Timestamp: " << timestamp << "\n";
 
     Hash transactionHash = hashBytesVector(bytes);
 
@@ -273,8 +264,20 @@ void Wallet::createTransaction() {
             cpr::Body{transactionJson.dump()},
             cpr::Header{{"Content-Type", "application/json"}}
     );
-    std::cout << r.text << "\n";
 
+    nlohmann::json responseJson = nlohmann::json::parse(r.text);
+    if(responseJson.contains("success")) {
+        std::cout << "\n\t[SUCCESS] Transaction created\n\n";
+    } else {
+        std::cout << "\n\t[BAD] " << responseJson["error"] << "\n\n";
+    }
+}
+
+uint64_t Wallet::checkBalance() {
+    cpr::Response r = cpr::Get(cpr::Url{"http://127.0.0.1:18080/address/" + getHex(address)});
+    nlohmann::json json = nlohmann::json::parse(r.text);
+    uint64_t coins = json["coins"];
+    return coins / UNITS;
 }
 
 Signature Wallet::sign(Hash& hash) {

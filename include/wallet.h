@@ -36,11 +36,13 @@ public:
     Wallet(Wallet&&) = delete;
     Wallet& operator=(Wallet&&) = delete;
 
+    bool status = false;
     void saveKeys();
     void loadKeys();
     void printKeys() const;
     void createTransaction();
     void createKeys();
+    uint64_t checkBalance();
     bool verifySignature(const Signature& signature, const Hash& hash);
 
 private:

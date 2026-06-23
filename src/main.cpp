@@ -1,19 +1,13 @@
 ﻿#include "wallet.h"
-#include <sodium/crypto_sign.h>
+#include <functional>
+#include <unordered_map>
 
-void signHash() {
-    std::string hashHex;
-    std::string secretKeyHex;
-
-    std::cout << "Hash hex: ";
-    std::cin >> hashHex;
-    std::cout << "\nPublic Key: ";
-    std::cin >> secretKeyHex;
-    Hash hash = getBytes<Hash>(hashHex);
-    SecretKey secretKey = getBytes<SecretKey>(secretKeyHex);
-    Signature signature{};
-    crypto_sign_detached(signature.data(), nullptr, hash.data(), hash.size(), secretKey.data());
-    std::cout << "\nSignature: " << getHex(signature) << "\n";
+void clearScreen() {
+    #ifdef _WIN32
+    system("cls");
+    #else
+    system("clear");
+    #endif
 }
 
 int main() {
@@ -22,72 +16,88 @@ int main() {
         return 1;
     }
 
-    Wallet& wallet = Wallet::getInstance();
 
-    int choice;
+    Wallet& wallet = Wallet::getInstance();
+    clearScreen();
+
+    std::string choice;
+    std::unordered_map<std::string, std::function<void()>> commands;
+    commands["create-keys"] = [&](){
+        clearScreen();
+        wallet.createKeys();
+        std::cout << "\n\t[SUCCESS] Keys created\n\n\n";
+    };
+    commands["load-keys"] = [&](){
+        clearScreen();
+        wallet.loadKeys();
+        std::cout << "\n\t[SUCCESS] Keys loaded\n\n";
+
+    };
+    commands["save-keys"] = [&](){
+        clearScreen();
+        wallet.saveKeys();
+        std::cout << "\n\t[SUCCESS] Keys saved\n\n";
+
+    };
+    commands["print-keys"] = [&](){
+        clearScreen();
+        wallet.printKeys();
+    };
+    commands["create-transaction"] = [&](){
+        clearScreen();
+        wallet.createTransaction();
+    };
+    commands["ct"] = [&](){
+        clearScreen();
+        wallet.createTransaction();
+    };
+    commands["balance"] = [&](){
+        clearScreen();
+        std::cout << "\n\tAvailable Balance: " << wallet.checkBalance() << "\n\n";
+    };
+    commands["verify-signature"] = [&](){
+        clearScreen();
+
+        std::string signatureHex;
+        std::string hashHex;
+
+        std::cout << "Signature: ";
+        std::cin >> signatureHex;
+
+        std::cout << "Hash: ";
+        std::cin >> hashHex;
+
+        bool valid = wallet.verifySignature(
+            getBytes<Signature>(signatureHex),
+            getBytes<Hash>(hashHex)
+        );
+
+        std::cout << (valid ? "Valid\n" : "Invalid\n");
+    };
+    commands["exit"] = [&](){ exit(0);
+    };
 
     while (true) {
-        std::cout << "\n";
-        std::cout << "1. Create Keys\n";
-        std::cout << "2. Load Keys\n";
-        std::cout << "3. Save Keys\n";
-        std::cout << "4. Print Keys\n";
-        std::cout << "5. Create Transaction\n";
-        std::cout << "6. Verify Signature\n";
-        std::cout << "7. Sign hash\n";
-        std::cout << "Choice: ";
+        std::cout << "\nCommands:\n";
+        std::cout << "\tcreate-keys\n";
+        std::cout << "\tload-keys\n";
+        std::cout << "\tsave-keys\n";
+        std::cout << "\tprint-keys\n";
+        std::cout << "\tcreate-transaction\n";
+        std::cout << "\tverify-signature\n";
+        std::cout << "\tbalance\n";
+        std::cout << "\texit\n";
+        std::cout << "wallet > ";
 
         std::cin >> choice;
 
-        switch (choice) {
-        case 1:
-            wallet.createKeys();
-            std::cout << "Keys created\n";
-            break;
-
-        case 2:
-            wallet.loadKeys();
-            std::cout << "Keys loaded\n";
-            break;
-
-        case 3:
-            wallet.saveKeys();
-            std::cout << "Keys saved\n";
-            break;
-
-        case 4:
-            wallet.printKeys();
-            break;
-
-        case 5:
-            wallet.createTransaction();
-            break;
-
-        case 6: {
-            std::string signatureHex;
-            std::string hashHex;
-
-            std::cout << "Signature: ";
-            std::cin >> signatureHex;
-
-            std::cout << "Hash: ";
-            std::cin >> hashHex;
-
-            bool valid = wallet.verifySignature(
-                getBytes<Signature>(signatureHex),
-                getBytes<Hash>(hashHex)
-            );
-
-            std::cout << (valid ? "Valid\n" : "Invalid\n");
-            break;
+        auto it = commands.find(choice);
+        if(it != commands.end()) {
+            it->second();
+        } else {
+            clearScreen();
+            std::cout << "\n\t[BAD]: Invalid command\n\n";
         }
 
-        case 7:
-            signHash();
-            break;
-        default:
-            std::cout << "Invalid choice\n";
-            break;
-        }
     }
 }
